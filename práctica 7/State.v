@@ -46,4 +46,56 @@ Record context : Set :=
        ctxt_oss : os_ident -> bool
     }.
 
+Record os : Set :=
+  OS {
+    (* guest OS current page table (physical address) *)
+    curr_page : padd;
+    (* whether it has a hypercall pending to be resolved *)
+    hcall : option Hyperv_call
+  }.
+
+Definition oss_map := os_ident -> os.
+
+(* Execution modes *)
+
+Inductive exec_mode :=
+  | usr (* user mode *)
+  | svc. (* supervisor mode *)
+
+Inductive os_activity :=
+  | running
+  | waiting.
+
+(* Memory mappings *)
+
+Definition hypervisor_map := os_ident -> (padd -> madd).
+
+Inductive content :=
+  | RW (v: option value)
+  | PT (va_to_ma : vadd -> madd)
+  | Other.
+
+Inductive page_owner :=
+  | Hyp
+  | Os (osi: os_ident)
+  | No_Owner.
+
+Record page : Set :=
+  Page {
+    page_content: content;
+    page_owned_by : page_owner
+  }.
+
+Definition system_memory := madd -> page.
+
+Record state : Set :=
+  State {
+    active_os : os_ident;
+    aos_exec_mode : exec_mode;
+    aos_activity : os_activity;
+    oss : oss_map;
+    hypervisor : hypervisor_map;
+    memory : system_memory
+  }.
+
 End State.
