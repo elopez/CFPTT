@@ -63,8 +63,8 @@ Inductive exec_mode :=
   | svc. (* supervisor mode *)
 
 Inductive os_activity :=
-  | running
-  | waiting.
+  | running (* OS is running *)
+  | waiting. (* Hypervisor is running, OS is waiting *)
 
 (* Memory mappings *)
 
@@ -97,5 +97,32 @@ Record state : Set :=
     hypervisor : hypervisor_map;
     memory : system_memory
   }.
+
+(* Auxiliary functions *)
+
+Definition va_mapped_to_ma (s: state) (va: vadd) (ma: madd) :=
+  let curr_os := active_os s in
+  let pt := curr_page (oss s curr_os) in
+  let hyper := hypervisor s curr_os in
+  let mem := memory s in
+  match page_content (mem (hyper pt)) with
+    | PT va_to_ma => va_to_ma va = ma
+    | _           => False
+  end.
+
+Definition is_RW (c: content) :=
+  match c with
+    | RW _ => True
+    | _    => False
+  end.
+
+Definition update (m: system_memory) (ma': madd) (p': page) :=
+  fun (ma: madd) => if madd_eq ma ma' then p' else m ma.
+
+Definition mutate_state (s: state) (e: exec_mode) (a: os_activity) :=
+  State (active_os s) e a (oss s) (hypervisor s) (memory s).
+
+Definition mutate_memory (s: state) (m: system_memory) :=
+  State (active_os s) (aos_exec_mode s) (aos_activity s) (oss s) (hypervisor s) m.
 
 End State.
