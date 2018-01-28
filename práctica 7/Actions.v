@@ -126,4 +126,41 @@ Proof.
           - discriminate.
 Qed.
 
+
+Lemma Read_isolation (s s': state) (va: vadd) :
+  one_step_execution s s' (read va) ->
+    (exists (ma: madd), va_mapped_to_ma s va ma /\
+      (exists (pg: page), pg = memory s ma /\ page_owned_by pg = Os (active_os s))).
+Proof.
+  (* let's simplify the proof a bit *)
+  intros.
+  inversion_clear H.
+  inversion_clear H1.
+  inversion_clear H3.
+  destruct H4 as [x [H3 H4]].
+  exists x.
+  split; auto.
+  exists (memory s x).
+  split; auto.
+  (* pose the valid state hypothesis into something useful *)
+  destruct H0 as [V3 [V5 V6]].
+  pose (V5 (active_os s) (curr_page (oss s (active_os s)))) as V5i.
+  pose (V6 (memory s (hypervisor s (active_os s) (curr_page (oss s (active_os s)))))) as V6i.
+  destruct V5i as [V5i_a V5i_b].
+  (* prove the rest *)
+  unfold va_mapped_to_ma in H3.
+  destruct (memory s (hypervisor s (active_os s) (curr_page (oss s (active_os s))))).
+  destruct page_content, page_owned_by; try inversion H3; try inversion V5i_a.
+  inversion H3.
+  pose (V6i va) as V6i_va.
+  destruct V6i_va.
+    * rewrite H6 in H7.
+      destruct H7.
+      assumption.
+    * destruct H7.
+      unfold os_accessible in H.
+      rewrite H in H7.
+      discriminate.
+Qed.
+
 End Actions.
