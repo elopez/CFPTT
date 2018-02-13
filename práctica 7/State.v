@@ -12,7 +12,7 @@ Section State.
 Parameter os_ident : Set.
 Parameter os_ident_eq : forall oi1 oi2 : os_ident, {oi1 = oi2} + {oi1 <> oi2}.
 
-Parameter Hyperv_call: Set.
+Parameter Hyper_call: Set.
 
 
 (* Memoria y direcciones *)
@@ -46,15 +46,17 @@ Record context : Set :=
        ctxt_oss : os_ident -> bool
     }.
 
+
+(* Operating systems *)
 Record os : Set :=
   OS {
     (* guest OS current page table (physical address) *)
     curr_page : padd;
     (* whether it has a hypercall pending to be resolved *)
-    hcall : option Hyperv_call
+    hcall : option Hyper_call
   }.
 
-Definition oss_map := os_ident -> os.
+Definition oss_map := os_ident -> option os.
 
 (* Execution modes *)
 
@@ -66,13 +68,14 @@ Inductive os_activity :=
   | running (* OS is running *)
   | waiting. (* Hypervisor is running, OS is waiting *)
 
+
 (* Memory mappings *)
 
-Definition hypervisor_map := os_ident -> (padd -> madd).
+Definition hypervisor_map := os_ident -> option (padd -> option madd).
 
 Inductive content :=
   | RW (v: option value)
-  | PT (va_to_ma : vadd -> madd)
+  | PT (va_to_ma : vadd -> option madd)
   | Other.
 
 Inductive page_owner :=
@@ -86,8 +89,10 @@ Record page : Set :=
     page_owned_by : page_owner
   }.
 
-Definition system_memory := madd -> page.
+Definition system_memory := madd -> option page.
 
+
+(* States *)
 Record state : Set :=
   State {
     active_os : os_ident;
@@ -98,17 +103,18 @@ Record state : Set :=
     memory : system_memory
   }.
 
+
 (* Auxiliary functions *)
 
 Definition va_mapped_to_ma (s: state) (va: vadd) (ma: madd) :=
-  let curr_os := active_os s in
-  let pt := curr_page (oss s curr_os) in
-  let hyper := hypervisor s curr_os in
-  let mem := memory s in
-  match page_content (mem (hyper pt)) with
-    | PT va_to_ma => va_to_ma va = ma
-    | _           => False
-  end.
+  exists (os: os) (hypermap: padd -> option madd)
+         (m: madd) (p: page) (pt: vadd -> option madd),
+    oss s (active_os s) = Some os /\
+    hypervisor s (active_os s) = Some hypermap /\
+    hypermap (curr_page os) = Some m /\
+    memory s m = Some p /\
+    page_content p = PT pt /\
+    pt va = Some ma.
 
 Definition is_RW (c: content) :=
   match c with
@@ -117,7 +123,7 @@ Definition is_RW (c: content) :=
   end.
 
 Definition update (m: system_memory) (ma': madd) (p': page) :=
-  fun (ma: madd) => if madd_eq ma ma' then p' else m ma.
+  fun (ma: madd) => if madd_eq ma ma' then Some p' else m ma.
 
 Definition mutate_state (s: state) (e: exec_mode) (a: os_activity) :=
   State (active_os s) e a (oss s) (hypervisor s) (memory s).

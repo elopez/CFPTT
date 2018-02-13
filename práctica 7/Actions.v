@@ -20,8 +20,8 @@ Definition os_accessible va := ctxt_vadd_accessible machine va = true.
 Definition pre_read (s: state) (va: vadd) :=
   os_accessible va /\
   aos_activity s = running /\
-  (exists ma : madd, va_mapped_to_ma s va ma /\
-  is_RW (page_content (memory s ma))).
+  (exists (ma : madd) (p : page), va_mapped_to_ma s va ma /\
+  memory s ma = Some p /\ is_RW (page_content p)).
 
 Definition post_read (s: state) (va: vadd) (s': state) := s = s'.
 
@@ -38,7 +38,8 @@ Definition post_write (s: state) (va: vadd) (v: value) (s': state) :=
 Definition pre_chmod (s: state) :=
   aos_activity s = waiting /\
   let curr_os := active_os s in
-  let curr_hcall := hcall (oss s curr_os) in
+  exists (ossmap: os), oss s curr_os = Some ossmap /\
+  let curr_hcall := hcall ossmap in
   curr_hcall = None.
 
 Definition post_chmod (s: state) (s': state) :=
@@ -64,28 +65,35 @@ Definition Post (s: state) (a: Action) (s': state) :=
     | chmod      => post_chmod s s'
   end.
 
+(* if the hypervisor or a trusted OS is running the processor
+ * must be in supervisor mode *)
 Definition valid_state_3 (s: state) :=
   let curr_os := active_os s in
   let trusted := ctxt_oss machine curr_os = true in
   let hyp_running := aos_activity s = waiting in
   (trusted \/ hyp_running) -> aos_exec_mode s = svc.
 
+(* the hypervisor maps an OS physical address to a machine
+ * address owned by that same OS. This mapping is also injective *)
 Definition valid_state_5 (s: state) :=
-  forall (os: os_ident) (pa: padd),
-  let hyp_pa_to_ma := hypervisor s os in
-  let ma_owner := fun ma => page_owned_by (memory s ma) in
-  ma_owner (hyp_pa_to_ma pa) = Os os /\
-  forall (pa': padd), hyp_pa_to_ma pa = hyp_pa_to_ma pa' -> pa = pa'.
+  forall (os: os_ident) (pa: padd) (m: padd -> option madd) (p: page) (ma: madd),
+  (hypervisor s os = Some m /\ m pa = Some ma /\ memory s ma = Some p) ->
+    (page_owned_by p = Os os /\
+    forall (pa': padd),
+      m pa <> None /\ m pa' <> None /\ m pa = m pa' -> pa = pa').
 
+(* all page tables of an OS o map accessible virtual addresses
+ * to pages owned by o and not accessible ones to pages owned by
+ * the hypervisor *)
 Definition valid_state_6 (s: state) :=
-  forall (page: page),
-  match page with
+  forall (pt: page),
+  match pt with
     | Page (PT vm) (Os owner) =>
-        let va_owner := fun va => page_owned_by (memory s (vm va)) in
         let accessible := ctxt_vadd_accessible machine in
-        forall (va: vadd),
-          (accessible va = true /\ va_owner va = Os owner) \/
-          (accessible va = false /\ va_owner va = Hyp)
+        forall (va: vadd), exists (ma: madd) (p: page),
+          vm va = Some ma /\ memory s ma = Some p /\
+          ((accessible va = true /\ page_owned_by p = Os owner) \/
+          (accessible va = false /\ page_owned_by p = Hyp))
     | _ => True
   end.
 
@@ -130,37 +138,38 @@ Qed.
 Lemma Read_isolation (s s': state) (va: vadd) :
   one_step_execution s s' (read va) ->
     (exists (ma: madd), va_mapped_to_ma s va ma /\
-      (exists (pg: page), pg = memory s ma /\ page_owned_by pg = Os (active_os s))).
+      (exists (pg: page), Some pg = memory s ma /\ page_owned_by pg = Os (active_os s))).
 Proof.
   (* let's simplify the proof a bit *)
   intros.
   inversion_clear H.
   inversion_clear H1.
-  inversion_clear H3.
-  destruct H4 as [x [H3 H4]].
-  exists x.
+  destruct H3 as (running & pre_ma & pre_pg & pre_mapped & pre_ma_page & pre_rw).
+  exists pre_ma.
   split; auto.
-  exists (memory s x).
+  exists pre_pg.
   split; auto.
+
   (* pose the valid state hypothesis into something useful *)
   destruct H0 as [V3 [V5 V6]].
-  pose (V5 (active_os s) (curr_page (oss s (active_os s)))) as V5i.
-  pose (V6 (memory s (hypervisor s (active_os s) (curr_page (oss s (active_os s)))))) as V6i.
-  destruct V5i as [V5i_a V5i_b].
+  destruct pre_mapped as (os & pm & ma & pg & vm & _ & A1 & A2 & A3 & A4 & A5).
+  pose (V5 (active_os s) (curr_page os) pm pg ma) as V5i.
+  pose (V6 pg) as V6i.
+  elim V5i; intros; auto.
+
   (* prove the rest *)
-  unfold va_mapped_to_ma in H3.
-  destruct (memory s (hypervisor s (active_os s) (curr_page (oss s (active_os s))))).
-  destruct page_content, page_owned_by; try inversion H3; try inversion V5i_a.
-  inversion H3.
-  pose (V6i va) as V6i_va.
-  destruct V6i_va.
-    * rewrite H6 in H7.
-      destruct H7.
-      assumption.
-    * destruct H7.
-      unfold os_accessible in H.
-      rewrite H in H7.
-      discriminate.
+  destruct pg, page_content, page_owned_by; try inversion A4; try inversion H0.
+  destruct (V6i va).
+  destruct H3 as (B0 & B1 & B2 & B3).
+  elim B3; intros;
+    rewrite -> H4, -> A5 in B1;
+    injection B1; intros;
+    rewrite <- H6, -> pre_ma_page in B2;
+    injection B2; intros.
+    * rewrite <- H7, -> H5, -> H in H3.
+      destruct H3; auto.
+    * rewrite -> H in H3.
+      destruct H3; discriminate.
 Qed.
 
 End Actions.
