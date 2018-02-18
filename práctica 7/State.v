@@ -3,8 +3,6 @@
  *
  ******************************************************************)
 
-Require Export Maps.
-
 Section State.
 
 (** Identificadores de OSs e Hypercalls *)
